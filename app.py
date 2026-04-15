@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -21,16 +22,39 @@ def _safe_name(url: str) -> str:
     return f"{stem}_улучшено.jpg"
 
 
+def _is_streamlit_cloud() -> bool:
+    e = os.environ
+    if e.get("STREAMLIT_CLOUD") == "1" or e.get("STREAMLIT_SHARING_MODE"):
+        return True
+    try:
+        cwd = str(Path.cwd())
+        if cwd.startswith("/mount") or "/mount/src/" in cwd:
+            return True
+    except OSError:
+        pass
+    return False
+
+
 st.set_page_config(page_title="Редактор фото", layout="centered")
 
 st.title("Редактор фото")
-st.caption("Вставьте прямую ссылку на изображение (https://…), нажмите «Улучшение», скачайте JPG.")
+st.caption(
+    "Вставьте прямую ссылку на изображение (https://…), нажмите «Улучшение», скачайте JPG."
+)
+
+if _is_streamlit_cloud():
+    st.info(
+        "В **Streamlit Cloud** нейросеть может не поместиться в память. "
+        "Если была ошибка «Oh no», в боковой панели выберите **«Быстро»** или обновите приложение после загрузки правок с GitHub."
+    )
 
 url = st.text_input(
     "Ссылка на фото",
     placeholder="https://example.com/image.webp",
     label_visibility="visible",
 )
+
+_default_mode_idx = 1 if _is_streamlit_cloud() else 0
 
 with st.sidebar:
     st.header("Дополнительно")
@@ -40,16 +64,16 @@ with st.sidebar:
         format_func=lambda x: "Нейросеть (лучше качество, дольше)"
         if x == "neural"
         else "Быстро (без тяжёлой модели)",
-        index=0,
+        index=_default_mode_idx,
     )
     jpg_q = st.slider("Качество JPG", 75, 100, 90)
     tile = st.number_input(
         "Тайл (нейросеть)",
         0,
         800,
-        400,
+        256 if _is_streamlit_cloud() else 400,
         50,
-        help="Меньше — меньше памяти. 0 — целиком (риск на больших фото).",
+        help="В облаке лучше 200–256. Меньше — меньше памяти.",
     )
     p_up = st.number_input("Масштаб (только «Быстро»)", 1, 4, 2)
 
@@ -60,7 +84,9 @@ if run:
         st.warning("Вставьте ссылку на картинку.")
     else:
         try:
-            with st.spinner("Загрузка и улучшение… Первый запуск может скачать модель (~33 МБ)."):
+            with st.spinner(
+                "Загрузка и улучшение… Первый запуск нейросети может скачать модель (~33 МБ)."
+            ):
                 img = process_url_to_image(
                     url.strip(),
                     mode=mode,
@@ -81,9 +107,9 @@ if run:
             )
         except Exception as e:
             st.error(f"Не получилось: {e}")
+            st.exception(e)
 
 st.divider()
 st.caption(
-    "Публикация в интернете: загрузите эту папку в репозиторий GitHub и подключите его в "
-    "[Streamlit Community Cloud](https://streamlit.io/cloud) (файл приложения: `app.py`)."
+    "Публикация: [Streamlit Community Cloud](https://streamlit.io/cloud), файл приложения `app.py`."
 )
