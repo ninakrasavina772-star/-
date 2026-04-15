@@ -1,6 +1,6 @@
 """
 Редактор фото: ссылка → «Улучшение» → JPG.
-Локально: streamlit run app.py
+Режимы: нейросеть (Real-ESRGAN) и быстрый (Pillow).
 """
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 import streamlit as st
 
 from enhance_image import image_to_jpeg_bytes, process_url_to_image
+from realesrgan_onnx import onnx_available
 
 SAFE = re.compile(r"[^a-zA-Z0-9._-]+")
 
@@ -39,13 +40,22 @@ st.set_page_config(page_title="Редактор фото", layout="centered")
 
 st.title("Редактор фото")
 st.caption(
-    "Вставьте прямую ссылку на изображение (https://…), нажмите «Улучшение», скачайте JPG."
+    "Вставьте прямую ссылку на изображение (https://…), нажмите «Улучшение», скачайте JPG. "
+    "Работает у всех, у кого есть ссылка на это приложение."
 )
 
-if _is_streamlit_cloud():
+if not onnx_available():
+    st.error(
+        "На сервере не установлен **onnxruntime** — нейросеть недоступна. "
+        "Добавьте в `requirements.txt` строку `onnxruntime>=1.17.0` и перезапустите деплой."
+    )
+
+_has_neural = onnx_available()
+if _has_neural and _is_streamlit_cloud():
     st.info(
-        "В **Streamlit Cloud** нейросеть может не поместиться в память. "
-        "Если была ошибка «Oh no», в боковой панели выберите **«Быстро»** или обновите приложение после загрузки правок с GitHub."
+        "**Первый запуск нейросети** может скачать модель (~33 МБ) и занять несколько минут. "
+        "На бесплатном облаке изображения **автоматически уменьшаются** перед апскейлом, чтобы не упасть по памяти. "
+        "Если «Oh no» — в боковой панели выберите **«Быстро»**."
     )
 
 url = st.text_input(
@@ -54,18 +64,20 @@ url = st.text_input(
     label_visibility="visible",
 )
 
-_default_mode_idx = 1 if _is_streamlit_cloud() else 0
-
 with st.sidebar:
-    st.header("Дополнительно")
-    mode = st.radio(
-        "Режим",
-        ("neural", "pillow"),
-        format_func=lambda x: "Нейросеть (лучше качество, дольше)"
-        if x == "neural"
-        else "Быстро (без тяжёлой модели)",
-        index=_default_mode_idx,
-    )
+    st.header("Режим")
+    if _has_neural:
+        mode = st.radio(
+            "Как улучшать",
+            ("neural", "pillow"),
+            format_func=lambda x: "Нейросеть (лучше качество, дольше)"
+            if x == "neural"
+            else "Быстро (без тяжёлой модели)",
+            index=1 if _is_streamlit_cloud() else 0,
+        )
+    else:
+        mode = "pillow"
+        st.caption("Доступен только режим **Быстро** — установите onnxruntime на сервере.")
     jpg_q = st.slider("Качество JPG", 75, 100, 90)
     tile = st.number_input(
         "Тайл (нейросеть)",
@@ -73,7 +85,8 @@ with st.sidebar:
         800,
         256 if _is_streamlit_cloud() else 400,
         50,
-        help="В облаке лучше 200–256. Меньше — меньше памяти.",
+        help="В облаке оставьте 200–256. Меньше — меньше памяти.",
+        disabled=not _has_neural,
     )
     p_up = st.number_input("Масштаб (только «Быстро»)", 1, 4, 2)
 
@@ -85,7 +98,8 @@ if run:
     else:
         try:
             with st.spinner(
-                "Загрузка и улучшение… Первый запуск нейросети может скачать модель (~33 МБ)."
+                "Загрузка и улучшение… "
+                + ("Первый раз нейросеть может скачать модель (~33 МБ). " if mode == "neural" else "")
             ):
                 img = process_url_to_image(
                     url.strip(),
@@ -111,5 +125,6 @@ if run:
 
 st.divider()
 st.caption(
-    "Публикация: [Streamlit Community Cloud](https://streamlit.io/cloud), файл приложения `app.py`."
+    "Публичная ссылка: задеплойте приложение на [Streamlit Cloud](https://streamlit.io/cloud) "
+    "или см. `Dockerfile` для Render / другого хостинга."
 )
